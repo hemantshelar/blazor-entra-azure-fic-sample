@@ -1,0 +1,90 @@
+# Deploy: OIDC login (UAMI + FIC), optional what-if, subscription Bicep deploy, zip deploy to App Service.
+# Configure repo secrets: AZURE_CLIENT_ID (UAMI client id), AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID.
+# GitHub Environments (recommended): create "dev" / "prod" with protection rules; map to this workflow's `environment` input.
+# Blazor Server scale-out: multiple App Service instances require Azure SignalR Service; add it in Bicep and configure the web app before scaling replicas.
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "GitHub Environment name (and parameter file selector)"
+        type: choice
+        options:
+          - dev
+          - prod
+        default: dev
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AZURE_LOCATION: australiaeast
+  DOTNET_VERSION: "10.0.x"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+          include-prerelease: true
+
+      - name: Select Bicep parameter file
+        id: params
+        run: |
+          ENV_NAME="${{ github.event.inputs.environment || 'dev' }}"
+          if [ "$ENV_NAME" = "prod" ]; then
+            echo "file=infra/bicep/parameters/prod.bicepparam" >> "$GITHUB_OUTPUT"
+          else
+            echo "file=infra/bicep/parameters/dev.bicepparam" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: What-if (subscription)
+        run: |
+          az deployment sub what-if \
+            --location "${{ env.AZURE_LOCATION }}" \
+            --template-file infra/bicep/main.bicep \
+            --parameters "${{ steps.params.outputs.file }}"
+
+      - name: Deploy infrastructure (subscription)
+        id: infra
+        run: |
+          set -e
+          OUT=$(az deployment sub create \
+            --name "deploy-${{ github.run_id }}" \
+            --location "${{ env.AZURE_LOCATION }}" \
+            --template-file infra/bicep/main.bicep \
+            --parameters "${{ steps.params.outputs.file }}" \
+            --query properties.outputs \
+            -o json)
+          echo "resource_group=$(echo "$OUT" | jq -r '.resourceGroupName.value')" >> "$GITHUB_OUTPUT"
+          echo "web_app=$(echo "$OUT" | jq -r '.webAppName.value')" >> "$GITHUB_OUTPUT"
+
+      - name: Publish web app
+        run: |
+          dotnet publish src/BlazorEntraSample.WebApp/BlazorEntraSample.WebApp.csproj \
+            -c Release \
+            -o "${{ runner.temp }}/publish"
+
+      - name: Zip site
+        run: (cd "${{ runner.temp }}/publish" && zip -r "${{ runner.temp }}/site.zip" .)
+
+      - name: Deploy to App Service
+        run: |
+          az webapp deploy \
+            --resource-group "${{ steps.infra.outputs.resource_group }}" \
+            --name "${{ steps.infra.outputs.web_app }}" \
+            --src-path "${{ runner.temp }}/site.zip" \
+            --type zip

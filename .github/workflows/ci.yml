@@ -1,0 +1,36 @@
+# CI: build the Blazor app and compile Bicep (no Azure subscription required).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: "10.0.x"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+          include-prerelease: true
+
+      - name: Restore and build
+        run: |
+          dotnet restore src/BlazorEntraSample.slnx
+          dotnet build src/BlazorEntraSample.slnx -c Release --no-restore
+
+      - name: Validate Bicep
+        uses: azure/cli@v2
+        with:
+          azcliversion: latest
+          inlineScript: az bicep build --file infra/bicep/main.bicep

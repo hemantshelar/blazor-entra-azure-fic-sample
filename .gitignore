@@ -1,0 +1,26 @@
+## .NET
+bin/
+obj/
+out/
+*.user
+*.suo
+*.cache
+*.log
+.vs/
+TestResults/
+
+## Rider / VS Code
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+## OS
+Thumbs.db
+.DS_Store
+
+## Secrets (use User Secrets locally)
+appsettings.*.local.json
+**/secrets.json
+
+## Bicep compiled artifacts (keep sources only)
+infra/bicep/**/*.json

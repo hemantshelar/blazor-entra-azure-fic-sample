@@ -1,0 +1,42 @@
+@page "/claims"
+@attribute [Authorize]
+@using System.Security.Claims
+
+<PageTitle>Claims</PageTitle>
+
+<h1>Signed-in user</h1>
+
+<p>This page requires sign-in (single-tenant Entra).</p>
+
+@if (claims.Any())
+{
+    <table class="table">
+        <thead>
+            <tr><th>Type</th><th>Value</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var c in claims)
+            {
+                <tr><td><code>@c.Type</code></td><td>@c.Value</td></tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private IEnumerable<Claim> claims = [];
+
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthenticationStateTask { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthenticationStateTask is null)
+        {
+            return;
+        }
+
+        var state = await AuthenticationStateTask;
+        claims = state.User.Claims.OrderBy(c => c.Type);
+    }
+}
